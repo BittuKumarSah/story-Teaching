@@ -6,13 +6,10 @@ import os
 class Settings(BaseSettings):
     APP_NAME: str = "StoryTeacher"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = True
+    DEBUG: bool = False
 
-    # Use SQLite for local development, PostgreSQL for production/Supabase
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL", 
-        "sqlite+aiosqlite:///./storyteacher.db"
-    )
+    # Supabase PostgreSQL (required - no SQLite fallback)
+    DATABASE_URL: str = os.getenv("DATABASE_URL")
 
     SECRET_KEY: str = "your-secret-key-change-in-production"
     ALGORITHM: str = "HS256"
