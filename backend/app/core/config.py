@@ -20,7 +20,8 @@ class Settings(BaseSettings):
 
     OPENAI_API_KEY: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None
-    AI_PROVIDER: str = "openai"
+    GEMINI_API_KEY: Optional[str] = None
+    AI_PROVIDER: str = "gemini"
 
     # Supabase specific (for auth/storage/realtime)
     SUPABASE_URL: Optional[str] = None
