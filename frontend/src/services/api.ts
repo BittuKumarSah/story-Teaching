@@ -5,8 +5,11 @@ import type {
   TeacherDashboardResponse, StoryAssignment, StoryAssignmentCreate
 } from '../types';
 
+// Use VITE_BACKEND_URL from Vercel binding in production, fallback to /api for local dev
+const baseURL = import.meta.env.VITE_BACKEND_URL || '/api';
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL,
   headers: {
     'Content-Type': 'application/json',
   },
