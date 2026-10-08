@@ -3,7 +3,7 @@ import os
 from typing import List, Dict, Any, Optional
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
-import google.generativeai as genai
+import httpx
 from app.core.config import settings
 from app.schemas import (
     StoryRequest, LearningObjectiveSchema, QuestionSchema,
@@ -16,15 +16,11 @@ class AIService:
         self.provider = settings.AI_PROVIDER
         self.openai_client = None
         self.anthropic_client = None
-        self.gemini_model = None
         
         if self.provider == "openai" and settings.OPENAI_API_KEY:
             self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         elif self.provider == "anthropic" and settings.ANTHROPIC_API_KEY:
             self.anthropic_client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-        elif self.provider == "gemini" and settings.GEMINI_API_KEY:
-            genai.configure(api_key=settings.GEMINI_API_KEY)
-            self.gemini_model = genai.GenerativeModel('gemini-1.5-pro')
 
     def _get_age_characteristics(self, age: int) -> Dict[str, Any]:
         if age <= 7:
@@ -157,8 +153,40 @@ OUTPUT FORMAT (JSON only):
   ]
 }}"""
 
+    async def _call_gemini_rest(self, prompt: str, temperature: float = 0.7, max_tokens: int = 4000, response_mime_type: str = "application/json") -> Dict[str, Any]:
+        """Call Gemini API directly via REST API (lighter than google-generativeai client)"""
+        if not settings.GEMINI_API_KEY:
+            return None
+            
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={settings.GEMINI_API_KEY}"
+        
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+                "responseMimeType": response_mime_type,
+            }
+        }
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(url, json=payload)
+            response.raise_for_status()
+            data = response.json()
+            
+            # Extract text from Gemini response
+            if "candidates" in data and data["candidates"]:
+                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                return json.loads(text)
+        return None
+
     async def generate_story(self, request: StoryRequest) -> Dict[str, Any]:
-        if not self.openai_client and not self.anthropic_client and not self.gemini_model:
+        # Check if any AI provider is configured
+        has_openai = self.openai_client is not None
+        has_anthropic = self.anthropic_client is not None
+        has_gemini = settings.GEMINI_API_KEY is not None
+        
+        if not has_openai and not has_anthropic and not has_gemini:
             return self._mock_story_response(request)
 
         prompt = self._build_story_prompt(request)
@@ -185,16 +213,10 @@ OUTPUT FORMAT (JSON only):
                     messages=[{"role": "user", "content": prompt}]
                 )
                 result = json.loads(response.content[0].text)
-            elif self.provider == "gemini" and self.gemini_model:
-                response = await self.gemini_model.generate_content_async(
-                    prompt,
-                    generation_config=genai.types.GenerationConfig(
-                        temperature=0.7,
-                        max_output_tokens=4000,
-                        response_mime_type="application/json",
-                    )
-                )
-                result = json.loads(response.text)
+            elif self.provider == "gemini" and settings.GEMINI_API_KEY:
+                result = await self._call_gemini_rest(prompt, temperature=0.7, max_tokens=4000)
+                if result is None:
+                    return self._mock_story_response(request)
             else:
                 return self._mock_story_response(request)
             
@@ -204,7 +226,11 @@ OUTPUT FORMAT (JSON only):
             return self._mock_story_response(request)
 
     async def generate_assessment(self, story_content: str, objectives: List[str], age: int) -> List[Dict[str, Any]]:
-        if not self.openai_client and not self.anthropic_client and not self.gemini_model:
+        has_openai = self.openai_client is not None
+        has_anthropic = self.anthropic_client is not None
+        has_gemini = settings.GEMINI_API_KEY is not None
+        
+        if not has_openai and not has_anthropic and not has_gemini:
             return self._mock_questions(objectives, age)
 
         prompt = self._build_assessment_prompt(story_content, objectives, age)
@@ -231,16 +257,10 @@ OUTPUT FORMAT (JSON only):
                     messages=[{"role": "user", "content": prompt}]
                 )
                 result = json.loads(response.content[0].text)
-            elif self.provider == "gemini" and self.gemini_model:
-                response = await self.gemini_model.generate_content_async(
-                    prompt,
-                    generation_config=genai.types.GenerationConfig(
-                        temperature=0.5,
-                        max_output_tokens=3000,
-                        response_mime_type="application/json",
-                    )
-                )
-                result = json.loads(response.text)
+            elif self.provider == "gemini" and settings.GEMINI_API_KEY:
+                result = await self._call_gemini_rest(prompt, temperature=0.5, max_tokens=3000)
+                if result is None:
+                    return self._mock_questions(objectives, age)
             else:
                 return self._mock_questions(objectives, age)
             
