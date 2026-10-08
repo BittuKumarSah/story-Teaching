@@ -3,6 +3,7 @@ import os
 from typing import List, Dict, Any, Optional
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
+import google.generativeai as genai
 from app.core.config import settings
 from app.schemas import (
     StoryRequest, LearningObjectiveSchema, QuestionSchema,
@@ -13,13 +14,17 @@ from app.schemas import (
 class AIService:
     def __init__(self):
         self.provider = settings.AI_PROVIDER
+        self.openai_client = None
+        self.anthropic_client = None
+        self.gemini_model = None
+        
         if self.provider == "openai" and settings.OPENAI_API_KEY:
             self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         elif self.provider == "anthropic" and settings.ANTHROPIC_API_KEY:
             self.anthropic_client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-        else:
-            self.openai_client = None
-            self.anthropic_client = None
+        elif self.provider == "gemini" and settings.GEMINI_API_KEY:
+            genai.configure(api_key=settings.GEMINI_API_KEY)
+            self.gemini_model = genai.GenerativeModel('gemini-1.5-pro')
 
     def _get_age_characteristics(self, age: int) -> Dict[str, Any]:
         if age <= 7:
@@ -153,7 +158,7 @@ OUTPUT FORMAT (JSON only):
 }}"""
 
     async def generate_story(self, request: StoryRequest) -> Dict[str, Any]:
-        if not self.openai_client and not self.anthropic_client:
+        if not self.openai_client and not self.anthropic_client and not self.gemini_model:
             return self._mock_story_response(request)
 
         prompt = self._build_story_prompt(request)
@@ -180,6 +185,16 @@ OUTPUT FORMAT (JSON only):
                     messages=[{"role": "user", "content": prompt}]
                 )
                 result = json.loads(response.content[0].text)
+            elif self.provider == "gemini" and self.gemini_model:
+                response = await self.gemini_model.generate_content_async(
+                    prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.7,
+                        max_output_tokens=4000,
+                        response_mime_type="application/json",
+                    )
+                )
+                result = json.loads(response.text)
             else:
                 return self._mock_story_response(request)
             
@@ -189,7 +204,7 @@ OUTPUT FORMAT (JSON only):
             return self._mock_story_response(request)
 
     async def generate_assessment(self, story_content: str, objectives: List[str], age: int) -> List[Dict[str, Any]]:
-        if not self.openai_client and not self.anthropic_client:
+        if not self.openai_client and not self.anthropic_client and not self.gemini_model:
             return self._mock_questions(objectives, age)
 
         prompt = self._build_assessment_prompt(story_content, objectives, age)
@@ -216,6 +231,16 @@ OUTPUT FORMAT (JSON only):
                     messages=[{"role": "user", "content": prompt}]
                 )
                 result = json.loads(response.content[0].text)
+            elif self.provider == "gemini" and self.gemini_model:
+                response = await self.gemini_model.generate_content_async(
+                    prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.5,
+                        max_output_tokens=3000,
+                        response_mime_type="application/json",
+                    )
+                )
+                result = json.loads(response.text)
             else:
                 return self._mock_questions(objectives, age)
             
@@ -249,9 +274,9 @@ OUTPUT FORMAT (JSON only):
                 {"name": "Professor Wise", "description": "A knowledgeable guide", "role": "guide"}
             ],
             "content": f"Sam was playing in the garden when Professor Wise appeared with a magical book about {request.topic}. "
-                       f"Together they discovered how {request.topic} works in the world around them. "
-                       f"Through fun examples and gentle guidance, Sam learned the key concepts and solved a puzzle using {request.topic}. "
-                       f"At the end, Sam realized that {request.topic} is everywhere and can be fun to explore!",
+                        f"Together they discovered how {request.topic} works in the world around them. "
+                        f"Through fun examples and gentle guidance, Sam learned the key concepts and solved a puzzle using {request.topic}. "
+                        f"At the end, Sam realized that {request.topic} is everywhere and can be fun to explore!",
             "learning_objectives": [
                 {"objective": f"Understand the basic concept of {request.topic}", "order_index": 0},
                 {"objective": f"Identify examples of {request.topic} in daily life", "order_index": 1},
